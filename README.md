@@ -14,8 +14,7 @@
   <a href="#-deployment">Deployment</a> •
   <a href="#-translations">Translations</a>
 </p>
----
- 
+
 ## ✨ Features
  
 ### 🎫 Ticket system
