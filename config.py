@@ -17,7 +17,14 @@ def _required(name: str) -> str:
 TOKEN = _required("DISCORD_TOKEN")
 GUILD_ID = int(_required("GUILD_ID"))
 STAFF_ROLE_ID = int(_required("STAFF_ROLE_ID"))
-TICKET_CATEGORY_ID = int(_required("TICKET_CATEGORY_ID"))
+SUPPORT_CATEGORY_ID = int(_required("SUPPORT_CATEGORY_ID"))
+PARTNERSHIP_CATEGORY_ID = int(_required("PARTNERSHIP_CATEGORY_ID"))
+
+# Maps each ticket kind to its Discord category
+TICKET_CATEGORIES = {
+    "support": SUPPORT_CATEGORY_ID,
+    "partnership": PARTNERSHIP_CATEGORY_ID,
+}
 TRANSCRIPT_CHANNEL_ID = int(_required("TRANSCRIPT_CHANNEL_ID"))
 
 LANGUAGE = os.getenv("LANGUAGE", "en").lower()
