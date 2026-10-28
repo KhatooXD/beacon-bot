@@ -27,7 +27,7 @@ TICKET_CATEGORIES = {
 }
 TRANSCRIPT_CHANNEL_ID = int(_required("TRANSCRIPT_CHANNEL_ID"))
 
-LANGUAGE = os.getenv("LANGUAGE", "en").lower()
+LANGUAGE = (os.getenv("BOT_LANGUAGE") or "en").strip().lower()
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Rome")
 
 if LANGUAGE not in SUPPORTED_LANGUAGES:
