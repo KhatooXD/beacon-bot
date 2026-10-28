@@ -190,13 +190,14 @@ class Tickets(commands.Cog):
         self.bot.add_view(TicketView(self))
 
     def find_open_ticket(self, guild: discord.Guild, user_id: int):
-        category = guild.get_channel(config.TICKET_CATEGORY_ID)
-        if not isinstance(category, discord.CategoryChannel):
-            return None
-        for channel in category.text_channels:
-            data = parse_topic(channel.topic)
-            if data and data[0] == user_id:
-                return channel
+        for category_id in config.TICKET_CATEGORIES.values():
+            category = guild.get_channel(category_id)
+            if not isinstance(category, discord.CategoryChannel):
+                continue
+            for channel in category.text_channels:
+                data = parse_topic(channel.topic)
+                if data and data[0] == user_id:
+                    return channel
         return None
 
     async def create_ticket(self, interaction: discord.Interaction, kind: str, answers: list[tuple[str, str]]):
@@ -209,7 +210,7 @@ class Tickets(commands.Cog):
             )
             return
 
-        category = guild.get_channel(config.TICKET_CATEGORY_ID)
+        category = guild.get_channel(config.TICKET_CATEGORIES[kind])
         staff_role = guild.get_role(config.STAFF_ROLE_ID)
         if not isinstance(category, discord.CategoryChannel) or staff_role is None:
             await interaction.response.send_message(t("ticket.invalid_config"), ephemeral=True)
