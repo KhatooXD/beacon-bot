@@ -1,2 +1,1 @@
-# khatoo-discord-bot
-a simple Discord bot with a ticket system and community tools, made with python 
+<img width="1280" height="400" alt="banner" src="https://github.com/user-attachments/assets/d810e879-6326-4fdb-a363-1af626958b47" />
