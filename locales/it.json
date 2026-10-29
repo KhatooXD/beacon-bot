@@ -26,6 +26,7 @@
   "ticket.footer": "Beacon 🔆 • Usa i pulsanti qui sotto per gestire il ticket",
   "ticket.created": "✅ Ticket creato: {channel}",
   "ticket.already_open": "⚠️ Hai già un ticket aperto: {channel}",
+  "ticket.cooldown": "⏳ Hai chiuso un ticket da poco. Potrai aprirne uno nuovo {time}.",
   "ticket.invalid_config": "❌ Configurazione ticket non valida, contatta lo staff.",
   "ticket.claim_button": "Prendi in carico",
   "ticket.claimed_label": "In carico: {name}",

@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import re
+import time
 
 import discord
 from discord import app_commands
@@ -10,6 +12,7 @@ from utils.i18n import t
 from utils.transcript import build_transcript
 
 COLOR = discord.Color.from_str("#F5B83D")
+log = logging.getLogger("beacon.tickets")
 
 SUPPORT = "support"
 PARTNERSHIP = "partnership"
@@ -35,8 +38,34 @@ def parse_topic(topic: str | None):
     return None
 
 
+async def report_error(interaction: discord.Interaction, error: Exception):
+    """Log the full error and show the user only a generic message."""
+    log.error(
+        "Interaction failed (user=%s, channel=%s)",
+        interaction.user.id, interaction.channel_id, exc_info=error,
+    )
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(t("error.generic"), ephemeral=True)
+        else:
+            await interaction.response.send_message(t("error.generic"), ephemeral=True)
+    except discord.HTTPException:
+        pass
+
+
+class SafeModal(discord.ui.Modal):
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        await report_error(interaction, error)
+
+
+class SafeView(discord.ui.View):
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
+        await report_error(interaction, error)
+
+
 # Modals
-class SupportModal(discord.ui.Modal, title=t("modal.support.title")):
+
+class SupportModal(SafeModal, title=t("modal.support.title")):
     problem = discord.ui.TextInput(
         label=t("modal.support.problem"),
         style=discord.TextStyle.paragraph,
@@ -53,7 +82,7 @@ class SupportModal(discord.ui.Modal, title=t("modal.support.title")):
         )
 
 
-class PartnershipModal(discord.ui.Modal, title=t("modal.partnership.title")):
+class PartnershipModal(SafeModal, title=t("modal.partnership.title")):
     server_name = discord.ui.TextInput(label=t("modal.partnership.name"), max_length=100)
     invite = discord.ui.TextInput(
         label=t("modal.partnership.invite"), placeholder="https://discord.gg/...", max_length=100
@@ -84,7 +113,7 @@ class PartnershipModal(discord.ui.Modal, title=t("modal.partnership.title")):
 
 # Panel
 
-class PanelView(discord.ui.View):
+class PanelView(SafeView):
     def __init__(self, cog: "Tickets"):
         super().__init__(timeout=None)
         self.cog = cog
@@ -109,9 +138,15 @@ class PanelView(discord.ui.View):
     )
     async def select_category(self, interaction: discord.Interaction, select: discord.ui.Select):
         existing = self.cog.find_open_ticket(interaction.guild, interaction.user.id)
+        until = self.cog.cooldown_until(interaction.user)
+
         if existing:
             await interaction.response.send_message(
                 t("ticket.already_open", channel=existing.mention), ephemeral=True
+            )
+        elif until:
+            await interaction.response.send_message(
+                t("ticket.cooldown", time=f"<t:{until}:R>"), ephemeral=True
             )
         elif select.values[0] == SUPPORT:
             await interaction.response.send_modal(SupportModal(self.cog))
@@ -124,7 +159,7 @@ class PanelView(discord.ui.View):
 
 # Tickets Buttons
 
-class TicketView(discord.ui.View):
+class TicketView(SafeView):
     def __init__(self, cog: "Tickets"):
         super().__init__(timeout=None)
         self.cog = cog
@@ -162,7 +197,7 @@ class TicketView(discord.ui.View):
         )
 
 
-class ConfirmCloseView(discord.ui.View):
+class ConfirmCloseView(SafeView):
     def __init__(self, cog: "Tickets"):
         super().__init__(timeout=60)
         self.cog = cog
@@ -183,6 +218,8 @@ class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.closing: set[int] = set()
+        # user_id -> unix time when the user can open a new ticket (kept in memory only)
+        self.cooldowns: dict[int, float] = {}
 
     async def cog_load(self):
         # Keep buttons and menus working after a bot restart
@@ -200,6 +237,16 @@ class Tickets(commands.Cog):
                     return channel
         return None
 
+    def cooldown_until(self, member: discord.Member) -> int | None:
+        """Unix timestamp when `member` can open a new ticket, or None if they can right now."""
+        if is_staff(member):
+            return None
+        until = self.cooldowns.get(member.id)
+        if until is None or until <= time.time():
+            self.cooldowns.pop(member.id, None)
+            return None
+        return int(until)
+
     async def create_ticket(self, interaction: discord.Interaction, kind: str, answers: list[tuple[str, str]]):
         guild, user = interaction.guild, interaction.user
 
@@ -207,6 +254,13 @@ class Tickets(commands.Cog):
         if existing:
             await interaction.response.send_message(
                 t("ticket.already_open", channel=existing.mention), ephemeral=True
+            )
+            return
+
+        until = self.cooldown_until(user)
+        if until:
+            await interaction.response.send_message(
+                t("ticket.cooldown", time=f"<t:{until}:R>"), ephemeral=True
             )
             return
 
@@ -290,15 +344,24 @@ class Tickets(commands.Cog):
             log_channel = channel.guild.get_channel(config.TRANSCRIPT_CHANNEL_ID)
             await log_channel.send(file=file, embed=embed)
 
+            # The cooldown starts when the previous ticket is closed
+            self.cooldowns[issuer_id] = time.time() + config.TICKET_COOLDOWN
+
             await asyncio.sleep(5)
             await channel.delete(reason=f"Ticket closed by {closer}")
-        except Exception as e:
-            # If something fails, the channel is NOT deleted so nothing is lost
-            await channel.send(t("ticket.close_error", error=e))
+        except Exception:
+            # The channel is NOT deleted, so nothing is lost
+            log.exception("Failed to close ticket #%s (%s)", channel.name, channel.id)
             self.closing.discard(channel.id)
-            raise
+            try:
+                await channel.send(t("ticket.close_error"))
+            except discord.HTTPException:
+                pass
 
- # Slash commands
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: Exception):
+        await report_error(interaction, error)
+
+    # Slash commands
 
     @app_commands.command(name="ticket-panel", description=t("cmd.ticket_panel.description"))
     @app_commands.guild_only()
@@ -341,6 +404,9 @@ class Tickets(commands.Cog):
             return
         if user.id == data[0]:
             await interaction.response.send_message(t("error.cannot_remove_issuer"), ephemeral=True)
+            return
+        if user == interaction.guild.me:
+            await interaction.response.send_message(t("error.cannot_remove_bot"), ephemeral=True)
             return
         await interaction.channel.set_permissions(user, overwrite=None)
         await interaction.response.send_message(t("ticket.user_removed", user=user.mention))

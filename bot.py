@@ -28,4 +28,5 @@ class Beacon(commands.Bot):
 
 
 if __name__ == "__main__":
-    Beacon().run(config.TOKEN)
+    # root_logger=True so our own log messages also show up in the console / journalctl
+    Beacon().run(config.TOKEN, root_logger=True)
