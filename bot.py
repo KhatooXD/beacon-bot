@@ -9,10 +9,9 @@ class Beacon(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True  # needed to read messages for transcripts
-        super().__init__(
+    super().__init__(
             command_prefix=commands.when_mentioned,
             intents=intents,
-            activity=discord.CustomActivity(name=t("bot.status")),
         )
 
     async def setup_hook(self):
