@@ -38,6 +38,22 @@ def parse_topic(topic: str | None):
     return None
 
 
+def get_ticket(channel) -> tuple[int, str] | None:
+    """Return (issuer_id, kind) if `channel` is a ticket, otherwise None.
+
+    A channel counts as a ticket only if its topic has the ticket format AND it
+    sits in the category configured for that kind of ticket.
+    """
+    if not isinstance(channel, discord.TextChannel):
+        return None
+    data = parse_topic(channel.topic)
+    if not data:
+        return None
+    if config.TICKET_CATEGORIES.get(data[1]) != channel.category_id:
+        return None
+    return data
+
+
 async def report_error(interaction: discord.Interaction, error: Exception):
     """Log the full error and show the user only a generic message."""
     log.error(
@@ -186,8 +202,9 @@ class TicketView(SafeView):
         style=discord.ButtonStyle.danger, custom_id="beacon:close",
     )
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        data = parse_topic(interaction.channel.topic)
+        data = get_ticket(interaction.channel)
         if not data:
+            await interaction.response.send_message(t("error.ticket_only"), ephemeral=True)
             return
         if not (is_staff(interaction.user) or interaction.user.id == data[0]):
             await interaction.response.send_message(t("error.cannot_close"), ephemeral=True)
@@ -204,6 +221,9 @@ class ConfirmCloseView(SafeView):
 
     @discord.ui.button(label=t("ticket.close_confirm"), style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not get_ticket(interaction.channel):
+            await interaction.response.edit_message(content=t("error.ticket_only"), view=None)
+            return
         await interaction.response.edit_message(content=t("ticket.closing"), view=None)
         await self.cog.close_ticket(interaction.channel, interaction.user)
 
@@ -232,7 +252,7 @@ class Tickets(commands.Cog):
             if not isinstance(category, discord.CategoryChannel):
                 continue
             for channel in category.text_channels:
-                data = parse_topic(channel.topic)
+                data = get_ticket(channel)
                 if data and data[0] == user_id:
                     return channel
         return None
@@ -312,7 +332,7 @@ class Tickets(commands.Cog):
         await interaction.followup.send(t("ticket.created", channel=channel.mention), ephemeral=True)
 
     async def close_ticket(self, channel: discord.TextChannel, closer: discord.Member):
-        data = parse_topic(channel.topic)
+        data = get_ticket(channel)
         if not data or channel.id in self.closing:
             return
         self.closing.add(channel.id)
@@ -365,6 +385,9 @@ class Tickets(commands.Cog):
 
     @app_commands.command(name="ticket-panel", description=t("cmd.ticket_panel.description"))
     @app_commands.guild_only()
+    # Hidden from regular members' menu; is_staff() is still checked because
+    # admins can change who sees these in Server Settings -> Integrations
+    @app_commands.default_permissions(manage_channels=True)
     async def ticket_panel(self, interaction: discord.Interaction):
         if not is_staff(interaction.user):
             await interaction.response.send_message(t("error.staff_only"), ephemeral=True)
@@ -379,8 +402,11 @@ class Tickets(commands.Cog):
     @app_commands.command(name="add", description=t("cmd.add.description"))
     @app_commands.describe(user=t("cmd.add.user"))
     @app_commands.guild_only()
+    # Hidden from regular members' menu; is_staff() is still checked because
+    # admins can change who sees these in Server Settings -> Integrations
+    @app_commands.default_permissions(manage_channels=True)
     async def add(self, interaction: discord.Interaction, user: discord.Member):
-        if not parse_topic(interaction.channel.topic):
+        if not get_ticket(interaction.channel):
             await interaction.response.send_message(t("error.ticket_only"), ephemeral=True)
             return
         if not is_staff(interaction.user):
@@ -394,8 +420,11 @@ class Tickets(commands.Cog):
     @app_commands.command(name="remove", description=t("cmd.remove.description"))
     @app_commands.describe(user=t("cmd.remove.user"))
     @app_commands.guild_only()
+    # Hidden from regular members' menu; is_staff() is still checked because
+    # admins can change who sees these in Server Settings -> Integrations
+    @app_commands.default_permissions(manage_channels=True)
     async def remove(self, interaction: discord.Interaction, user: discord.Member):
-        data = parse_topic(interaction.channel.topic)
+        data = get_ticket(interaction.channel)
         if not data:
             await interaction.response.send_message(t("error.ticket_only"), ephemeral=True)
             return
@@ -407,6 +436,10 @@ class Tickets(commands.Cog):
             return
         if user == interaction.guild.me:
             await interaction.response.send_message(t("error.cannot_remove_bot"), ephemeral=True)
+            return
+        if is_staff(user):
+            # Staff see every ticket through the staff role, so removing them would do nothing
+            await interaction.response.send_message(t("error.cannot_remove_staff"), ephemeral=True)
             return
         await interaction.channel.set_permissions(user, overwrite=None)
         await interaction.response.send_message(t("ticket.user_removed", user=user.mention))
